@@ -1,0 +1,146 @@
+import streamlit as st
+import pandas as pd
+import time
+import requests
+from rag import get_rag_answer_stream
+from persona import create_persona
+from translate import translate_text
+from map_utils import extract_locations, show_locations_on_map
+from chat_logger import log_chat
+import folium
+from streamlit_folium import st_folium
+
+# ----- MBTI 설명 딕셔너리 -----
+mbti_traits = {
+    "ISTJ": "조용하고 책임감이 강하며 조직적입니다.",
+    "ISFJ": "성실하고 협조적이며 타인을 돕는 것을 좋아합니다.",
+    "INFJ": "통찰력 있고 조용한 이상주의자입니다.",
+    "INTJ": "전략적 사고와 독립심이 강한 혁신가입니다.",
+    "ISTP": "논리적이며 실용적인 문제 해결자입니다.",
+    "ISFP": "차분하고 온화하며 감성적인 성향이 있습니다.",
+    "INFP": "이상과 가치를 중시하며 공감 능력이 뛰어납니다.",
+    "INTP": "탐구심 많고 분석적이며 독창적인 사색가입니다.",
+    "ESTP": "에너지 넘치고 현실적인 활동가입니다.",
+    "ESFP": "사교적이고 감각적이며 즐거움을 추구합니다.",
+    "ENFP": "열정적이고 창의적이며 타인을 잘 이끕니다.",
+    "ENTP": "도전적이고 재치 있으며 창의적인 문제 해결자입니다.",
+    "ESTJ": "체계적이고 실용적인 관리자입니다.",
+    "ESFJ": "따뜻하고 친근하며 타인을 돕는 데 익숙합니다.",
+    "ENFJ": "이타적이고 리더십이 뛰어난 유형입니다.",
+    "ENTJ": "야망 있고 결정력이 뛰어난 전략가입니다."
+}
+
+def mbti_description(mbti):
+    return mbti_traits.get(mbti, "")
+
+# 페이지 설정 및 사용자 상태 초기화
+st.set_page_config(page_title="서울 문화 추천 챗봇", layout="wide")
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+# ----- UI 설정 -----
+st.markdown("""
+    <style>
+    .main {background-color: #f9f9f9; font-family: 'Nanum Gothic', sans-serif;}
+    .stTextInput > div > div > input {font-size: 16px;}
+    .stSelectbox > div > div > div {font-size: 16px;}
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("🎨 서울 문화 탐험 챗봇")
+st.markdown("서울시의 야경, 음식, 관광지, 문화행사에 대해 궁금한 걸 물어보세요!")
+
+# ----- 사이드바: 사용자 정보 받기 -----
+st.sidebar.header("📌 당신에 대해 알려주세요")
+mbti = st.sidebar.selectbox("MBTI (선택)", ["모름"] + list(mbti_traits.keys()))
+gender = st.sidebar.selectbox("성별", ["남성", "여성"])
+age = st.sidebar.selectbox("나이대", ["10대", "20대", "30대", "40대", "50대 이상"])
+region = st.sidebar.selectbox("거주 지역", ["서울", "수도권(서울 외 경기/인천)", "그 외 지역"])
+language = st.sidebar.selectbox("답변 받을 언어", ["한국어", "English", "日本語", "中文"])
+
+use_location = st.sidebar.checkbox("현재 위치를 질문에 반영할까요?")
+location = st.sidebar.text_input("현재 위치를 입력하세요 (예: 강남구)") if use_location else ""
+
+# ----- 대화 기록을 사이드바에 표시 -----
+st.sidebar.markdown("## 📜 대화 기록")
+for q, a in st.session_state.chat_history:
+    st.sidebar.markdown(f"**🙋 질문:** {q}")
+    st.sidebar.markdown(f"**🤖 답변:** {a}")
+
+# ----- Persona 생성 -----
+persona = create_persona(gender, age, region)
+if mbti != "모름":
+    persona += f"\nMBTI 성향은 {mbti}입니다. {mbti_description(mbti)}"
+st.sidebar.markdown(f"🧍 **[당신의 Persona]**\n{persona}")
+
+# ----- 채팅 영역 -----
+st.markdown("## 💬 대화 기록")
+for q, a in st.session_state.chat_history:
+    st.markdown(f"**🙋 질문:** {q}")
+    st.markdown(f"**🤖 답변:** {a}")
+
+# ----- 새로운 질문 입력 -----
+st.markdown("## 🤔 이어서 질문하기")
+question = st.text_input("질문을 입력하세요", key="new_question")
+submit = st.button("전송")
+
+# ----- 질문 처리 및 응답 -----
+if submit and question:
+    with st.spinner("답변을 생성 중입니다..."):
+        translated_question = translate_text(question, language)
+        stream_generator = get_rag_answer_stream(translated_question, persona, use_location, location)
+
+        streamed_text = ""
+        answer_placeholder = st.empty()
+        for chunk in stream_generator:
+            streamed_text += chunk
+            answer_placeholder.markdown(f"<div style='font-size:18px; line-height:1.6;'>{streamed_text}</div>", unsafe_allow_html=True)
+
+        translated_answer = translate_text(streamed_text, language)
+        log_chat(question, translated_answer, language)
+
+        # 채팅 기록에 추가
+        st.session_state.chat_history.append((question, translated_answer))
+
+        # 지도 시각화
+        places = extract_locations(translated_answer)
+        if places:
+            st.markdown("### 🗺️ 추천 장소 지도 및 경로")
+
+            # 네이버 지도 API를 사용하여 장소 검색 후 위치 표시
+            CLIENT_ID = "ncp_iam_BPAMKRw7t4ieo5EHZpnY"  # 네이버 API 클라이언트 ID
+            CLIENT_SECRET = "ncp_iam_BPKMKR4N2T4LhfU2SHeIerRCJqpjKJ5QF0"  # 네이버 API 시크릿
+
+            def search_place(query):
+                url = f"https://openapi.naver.com/v1/search/local.json?query={query}&display=1"
+                headers = {
+                    "X-Naver-Client-Id": CLIENT_ID,
+                    "X-Naver-Client-Secret": CLIENT_SECRET,
+                }
+                response = requests.get(url, headers=headers)
+                return response.json()
+
+            def get_coordinates(place_data):
+                if place_data['items']:
+                    latitude = place_data['items'][0]['mapy']
+                    longitude = place_data['items'][0]['mapx']
+                    return latitude, longitude
+                else:
+                    return None, None
+
+            # 지도 생성 및 장소 경로 표시
+            m = folium.Map(location=[37.5665, 126.978], zoom_start=13)  # 서울을 기본 위치로 설정
+            last_coords = None
+
+            for place in places:
+                place_data = search_place(place)
+                lat, lon = get_coordinates(place_data)
+
+                if lat and lon:
+                    folium.Marker([lat, lon], popup=place).add_to(m)
+                    if last_coords:
+                        folium.PolyLine([last_coords, (lat, lon)], color="blue", weight=3).add_to(m)
+                    last_coords = (lat, lon)
+
+            # 지도 출력
+            st_folium(m, width=700, height=500)

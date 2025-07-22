@@ -1,0 +1,34 @@
+import os
+import json
+import datetime
+
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# 대화 로그 저장
+def log_chat(question, answer, language="한국어"):
+    now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = os.path.join(LOG_DIR, f"chat_{now}.json")
+    data = {
+        "language": language,
+        "question": question,
+        "answer": answer,
+        "timestamp": now
+    }
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    return filename
+
+# 전체 채팅 기록 저장
+def save_full_chat(chat_history, filename=None):
+    now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    if not filename:
+        filename = os.path.join(LOG_DIR, f"chat_session_{now}.json")
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(chat_history, f, ensure_ascii=False, indent=2)
+    return filename
+
+# 저장된 대화 불러오기
+def load_chat(filepath):
+    with open(filepath, "r", encoding="utf-8") as f:
+        return json.load(f)

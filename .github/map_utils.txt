@@ -1,0 +1,58 @@
+from geopy.geocoders import Nominatim
+import folium
+from streamlit_folium import st_folium
+
+# 📍 장소 이름에서 위도/경도 추출
+def get_coordinates(place_name):
+    try:
+        geolocator = Nominatim(user_agent="seoul-cultural-chatbot")
+        location = geolocator.geocode("서울 " + place_name)
+        if location:
+            return (location.latitude, location.longitude)
+    except:
+        return None
+
+# 📌 답변에서 장소 이름 추출 (간단한 키워드 필터링 기반)
+def extract_locations(text):
+    keywords = ["서울", "한강", "공원", "거리", "광장", "타워", "궁", "시장", "성당", "명소", "문화", "야경", "전시"]
+    lines = text.split("\n")
+    results = []
+    for line in lines:
+        if any(keyword in line for keyword in keywords):
+            results.append(line.strip())
+    return results[:5]
+
+# 🗺️ 장소 목록과 출발지를 받아서 지도 표시 + 경로 연결
+def show_locations_on_map(places, start_point=None):
+    locations = []
+
+    # 출발지 먼저 추가
+    if start_point:
+        start_coords = get_coordinates(start_point)
+        if start_coords:
+            locations.append(("출발지", start_coords))
+
+    # 장소명 → 좌표 변환
+    for place in places:
+        coords = get_coordinates(place)
+        if coords:
+            locations.append((place, coords))
+
+    if not locations:
+        return
+
+    # 지도 생성 (첫 번째 좌표를 중심으로)
+    center = locations[0][1]
+    m = folium.Map(location=center, zoom_start=13)
+
+    # 마커 추가
+    for i, (name, coord) in enumerate(locations):
+        icon_color = "green" if i == 0 and start_point else "blue"
+        folium.Marker(location=coord, tooltip=name, icon=folium.Icon(color=icon_color)).add_to(m)
+
+    # 경로 선 연결
+    if len(locations) >= 2:
+        folium.PolyLine([loc[1] for loc in locations], color="blue", weight=3).add_to(m)
+
+    # Streamlit에 표시
+    st_folium(m, width=700, height=500)

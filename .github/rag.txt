@@ -1,0 +1,77 @@
+# rag.py
+import pandas as pd
+import requests
+import json
+from sentence_transformers import SentenceTransformer, util
+
+# ===== 데이터 로딩 =====
+file_paths = [
+    "./data/서울시 야경명소 정보 (1).csv",
+    "./data/서울시 관광 음식 (1).csv",
+    "./data/서울시 관광거리 정보 (한국어).csv",
+    "./data/서울시 문화행사 정보.csv"
+]
+
+def load_corpus():
+    corpus = []
+    for path in file_paths:
+        df = pd.read_csv(path)
+        for _, row in df.iterrows():
+            text = " ".join(str(v) for v in row.values if pd.notnull(v))
+            corpus.append(text)
+    return corpus
+
+corpus = load_corpus()
+
+# ===== 임베딩 모델 초기화 =====
+embedder = SentenceTransformer("jhgan/ko-sroberta-multitask")
+corpus_embeddings = embedder.encode(corpus, convert_to_tensor=True)
+
+# ===== Ollama 스트리밍 응답 함수 =====
+def generate_with_ollama_stream(prompt):
+    try:
+        with requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": "gemma3:12b",
+                "prompt": prompt,
+                "stream": True
+            },
+            stream=True
+        ) as response:
+            for line in response.iter_lines():
+                if line:
+                    try:
+                        data = json.loads(line.decode("utf-8"))
+                        if "response" in data:
+                            yield data["response"]
+                    except json.JSONDecodeError:
+                        continue
+    except Exception as e:
+        yield f"[오류 발생] Ollama 호출 실패: {e}"
+
+# ===== 메인 RAG + 스트리밍 함수 =====
+def get_rag_answer_stream(query, persona, use_location=False, location=""):
+    query_embedding = embedder.encode(query, convert_to_tensor=True)
+    hits = util.semantic_search(query_embedding, corpus_embeddings, top_k=3)
+    results = [corpus[hit['corpus_id']] for hit in hits[0]]
+
+    context = "\n".join(results)
+    location_note = f"현재 사용자의 위치는 '{location}'입니다. 이 위치를 고려해서 답변하세요.\n" if use_location and location else ""
+
+    prompt = f"""
+당신은 서울 문화 관광 전문가입니다. 사용자 Persona는 {persona}입니다.
+{location_note}
+아래 정보를 참고하여 질문에 친절하고 구체적으로 답변하세요.
+
+[정보]
+{context}
+
+[질문]
+{query}
+
+[답변]
+"""
+
+    for chunk in generate_with_ollama_stream(prompt):
+        yield chunk

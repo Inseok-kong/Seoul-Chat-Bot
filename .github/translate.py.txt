@@ -1,0 +1,22 @@
+# translate.py
+from googletrans import Translator
+
+translator = Translator()
+
+# 언어 코드 매핑
+lang_map = {
+    "한국어": "ko",
+    "English": "en",
+    "日本語": "ja",
+    "中文": "zh-cn"
+}
+
+def translate_text(text, target_lang):
+    if target_lang == "한국어":
+        return text  # 번역 필요 없음
+    try:
+        target_code = lang_map.get(target_lang, "en")
+        result = translator.translate(text, dest=target_code)
+        return result.text
+    except Exception as e:
+        return f"[번역 오류]: {e}"
