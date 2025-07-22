@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="utf-8" />
+    <title>서울시 문화행사 지도</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Leaflet + MarkerCluster -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+
+    <style>
+        #map { height: 100vh; width: 100%; }
+        .filters {
+            position: absolute;
+            top: 10px;
+            right: 10px; /* 오른쪽 정렬 */
+            z-index: 999;
+            background: white;
+            padding: 5px;
+            border-radius: 5px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.2);
+        }
+        .filters button { margin: 2px; }
+    </style>
+</head>
+
+<body>
+
+    <div class="filters">
+        <button onclick="filterMarkers('all')">전체보기</button>
+        <button onclick="filterMarkers('전시/미술')">전시/미술</button>
+        <button onclick="filterMarkers('교육/체험')">교육/체험</button>
+        <button onclick="filterMarkers('공연')">공연</button>
+        <button onclick="filterMarkers('기타')">기타</button>
+    </div>
+
+    <div id="map"></div>
+
+    <script>
+        const map = L.map('map').setView([37.5665, 126.9780], 11);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        const markers = L.markerClusterGroup();
+        const allMarkers = [];
+
+        async function loadData() {
+            const res = await fetch('/events');
+            const events = await res.json();
+
+            events.forEach(event => {
+
+                // ★ 핀 아이콘 사용
+                const icon = L.icon({
+                    iconUrl: "https://cdn-icons-png.flaticon.com/512/854/854878.png",
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 30],
+                    popupAnchor: [0, -30]
+                });
+
+                const marker = L.marker(
+                    [parseFloat(event['위도(Y좌표)']), parseFloat(event['경도(X좌표)'])],
+                    { icon: icon }
+                );
+
+                marker.bindPopup(`
+                    <div>
+                        <h3>${event['공연/행사명']}</h3>
+                        <p><strong>날짜:</strong> ${event['날짜/시간']}</p>
+                        <p><strong>장소:</strong> ${event['장소']}</p>
+                        <p><strong>기관:</strong> ${event['기관명']}</p>
+                        <p><strong>대상:</strong> ${event['이용대상']}</p>
+                        <p><strong>요금:</strong> ${event['이용요금']}</p>
+                        <p><a href="${event['문화포털상세URL']}" target="_blank">상세 보기</a></p>
+                        <img src="${event['대표이미지']}" width="100%" onclick="window.open('${event['대표이미지']}','_blank')">
+                    </div>
+                `);
+
+                marker.category = event['분류'];
+                allMarkers.push(marker);
+                markers.addLayer(marker);
+            });
+
+            map.addLayer(markers);
+        }
+
+        function filterMarkers(category) {
+            markers.clearLayers();
+            if (category === 'all') {
+                allMarkers.forEach(m => markers.addLayer(m));
+            } else {
+                allMarkers.filter(m => m.category === category).forEach(m => markers.addLayer(m));
+            }
+        }
+
+        loadData();
+    </script>
+</body>
+
+</html>
